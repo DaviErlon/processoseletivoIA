@@ -110,18 +110,37 @@ do dataset, que somadas dêem 1.
 Para a estratégia de validação, 10% dos dados de treino são separados automaticamente via `validation_split=0.1`,
 permitindo acompanhar o desempenho do modelo em dados não vistos durante cada época. O treinamento também conta
 com `EarlyStopping`, monitorando a perda de validação (`val_loss`) com paciência de 2 épocas — ou seja, o
-treinamento é interrompido caso a métrica não melhore por duas vezes consecutivas que a IA tenha visto todo o
-conjunto de treino. Combinado com `restore_best_weights=True`, isso garante que os pesos salvos ao final correspondam
-ao melhor ponto de desempenho observado, evitando que o modelo final seja prejudicado por overfitting nas últimas épocas.
+treinamento é interrompido caso a métrica não melhore por 2 épocas consecutivas (sendo uma época cada vez que o modelo percorre todo o conjunto de treino). Combinado com `restore_best_weights=True`, isso garante que os pesos salvos ao final correspondam ao melhor ponto de desempenho observado, evitando que o modelo final seja prejudicado por overfitting nas últimas épocas.
+
+#### Escolhas de hiperpârametros
+
+Algumas escolhas de hiperparâmetro merecem destaque. A progressão de filtros (32 → 64 → 128,
+dobrando a cada bloco) segue uma prática comum em CNNs: começar com poucos filtros na primeira
+camada, já que características de baixo nível (bordas, linhas) não exigem muitos detectores
+diferentes, e aumentar a profundidade nos blocos seguintes, onde a rede precisa combinar essas
+características simples em padrões mais complexos e específicos das classes. Começar já em 128
+filtros seria custoso e desnecessário logo na primeira camada; começar em 32 e dobrar mantém o
+crescimento de capacidade proporcional à complexidade que cada bloco precisa capturar.
+
+O valor de `Dropout(0.3)` foi escolhido como meio-termo: valores mais baixos (0.1) dariam
+regularização insuficiente pra uma rede com 3 blocos convolucionais e 128 neurônios na camada
+densa, enquanto valores mais altos (0.5+) descartariam informação demais numa tarefa já
+relativamente simples como o MNIST — a proximidade entre a acurácia de validação (99,42%) e a de
+teste (99,39%) sugere que o equilíbrio funcionou.
+
+Já o `patience=2` do `EarlyStopping` foi definido baixo de propósito: como o MNIST converge rápido
+e o `val_loss` tende a estabilizar cedo, uma paciência maior só arriscaria treinar épocas extras
+sem ganho real, enquanto um valor menor (0 ou 1) poderia interromper o treino por uma flutuação
+normal da métrica.
 
 ### 2️⃣ Bibliotecas Utilizadas
 
 O projeto utiliza duas bibliotecas externas, listadas no `requirements.txt`:
 
-- **`tensorflow>=2.12`** — usada em todas as etapas do pipeline: construção e treinamento da CNN
+- **`tensorflow==2.15.1`** — usada em todas as etapas do pipeline: construção e treinamento da CNN
   (`train_model.py`), conversão e quantização do modelo (`optimize_model.py`) e inferência via
   `tf.lite.Interpreter` (`run_inference.py`).
-- **`numpy>=1.23`** — usada para manipulação dos arrays de imagens (normalização, reshape e
+- **`numpy>=1.26.4`** — usada para manipulação dos arrays de imagens (normalização, reshape e
   montagem dos batches de entrada).
 
 Além dessas, também é utilizada a biblioteca padrão python para interação trivial com arquivos do sistema.
@@ -133,22 +152,22 @@ Quantization**, habilitada através de `converter.optimizations = [tf.lite.Optim
 
 ### 4️⃣ Resultados Obtidos
 
-O modelo atingiu **99,18% de acurácia de validação** (com perda de validação de 0,0339), obtida na época com melhor desempenho e restaurada via `restore_best_weights=True`. No conjunto de teste, a acurácia foi de **98,78%**.
+O modelo atingiu **99,42% de acurácia de validação** (com perda de validação de 0,0261), obtida na época com melhor desempenho e restaurada via `restore_best_weights=True`. No conjunto de teste, a acurácia foi de **99,39%**.
 
 Tamanho dos artefatos gerados:
 
 | Arquivo | Tamanho |
 |---|---|
-| `model.h5` | 2.909,23 KB (~2,84 MB) |
-| `model.tflite` | 250,41 KB (~0,24 MB) |
+| `model.h5` | 2.913,79 KB (~2,91 MB) |
+| `model.tflite` | 247,73 KB (~0,24 MB) |
 
-A quantização dinâmica aplicada em `optimize_model.py` reduziu o tamanho do modelo em **91,39%**,
+A quantização dinâmica aplicada em `optimize_model.py` reduziu o tamanho do modelo em **91,50%**,
 tornando-o significativamente mais leve para cenários de inferência em edge, com impacto mínimo
 esperado sobre a acurácia.
 
-### 5️⃣ Comentários Adicionais (Opcional)
+### 5️⃣ Comentários Adicionais
 
-Durante o treinamento, o `EarlyStopping` interrompeu o processo na **5ª época**, mesmo com o limite configurado em 10 épocas. Isso aconteceu porque a perda de validação parou de melhorar por 2 épocas consecutivas (a partir da época 3, que teve o melhor `val_loss` de 0,0339), atingindo a paciência configurada. Graças ao `restore_best_weights=True`, os pesos salvos correspondem à época 3, e não à última executada, evitando que o modelo final fosse prejudicado por um leve overfitting.
+Durante o treinamento, o `EarlyStopping` interrompeu o processo na **9ª época**, mesmo com o limite configurado em 10 épocas. Isso aconteceu porque a perda de validação parou de melhorar por 2 épocas consecutivas (a partir da época 7, que teve o melhor `val_loss` de 0,0261), atingindo a paciência configurada. Graças ao `restore_best_weights=True`, os pesos salvos correspondem à época 7, e não à última executada, evitando que o modelo final fosse prejudicado por um leve overfitting.
 
 Também foi testada uma variação da arquitetura com um **quarto bloco convolucional**, idêntico ao
 terceiro (128 filtros + `BatchNormalization` + `MaxPooling2D`). O resultado não trouxe ganho de
@@ -175,4 +194,4 @@ Saída ao rodar `run_inference`:
   Amostra 5: predito=4 | real=4
 ```
 
-Todas as amostras foram respondidas corretamente pelo modelo quantizado e otimizado.
+Todas as amostras foram respondidas corretamente pelo modelo quantizado e otimizado. Vale destacar a amostra 4 (dígito 0): por ter um contorno simples e bem definido, tende a ser um dos dígitos mais fáceis de classificar mesmo após a quantização, já que sua forma geométrica é pouco ambígua se comparada a dígitos visualmente próximos entre si, como 4/9 ou 3/8.
